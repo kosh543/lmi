@@ -20,7 +20,6 @@
 // snail: Chicares, 186 Belle Woods Drive, Glastonbury CT 06033, USA
 
 #include "assert_lmi.hpp"
-#include "boost_regex.hpp"
 #include "contains.hpp"
 #include "handle_exceptions.hpp"        // report_exception()
 #include "istream_to_string.hpp"
@@ -36,6 +35,7 @@
 #include <iostream>
 #include <map>
 #include <ostream>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>                    // runtime_error
@@ -256,7 +256,7 @@ bool file::is_of_phylum(enum_kingdom z) const
 
 bool file::phyloanalyze(std::string const& s) const
 {
-    return boost::regex_search(file_name(), boost::regex(s));
+    return std::regex_search(file_name(), std::regex(s));
 }
 
 bool error_flag = false;
@@ -273,7 +273,7 @@ void require
     ,std::string const& complaint
     )
 {
-    if(!boost::regex_search(f.data(), boost::regex(regex)))
+    if(!std::regex_search(f.data(), std::regex(regex)))
         {
         complain(f, complaint);
         }
@@ -285,7 +285,7 @@ void forbid
     ,std::string const& complaint
     )
 {
-    if(boost::regex_search(f.data(), boost::regex(regex)))
+    if(std::regex_search(f.data(), std::regex(regex)))
         {
         complain(f, complaint);
         }
@@ -294,11 +294,11 @@ void forbid
 void taboo
     (file const&             f
     ,std::string const&      regex
-    ,boost::regex::flag_type flags = boost::regex::ECMAScript
+    ,std::regex::flag_type   flags = std::regex::ECMAScript
     )
 {
-    boost::regex::flag_type syntax = flags | boost::regex::ECMAScript;
-    if(boost::regex_search(f.data(), boost::regex(regex, syntax)))
+    std::regex::flag_type syntax = flags | std::regex::ECMAScript;
+    if(std::regex_search(f.data(), std::regex(regex, syntax)))
         {
         std::ostringstream oss;
         oss << "breaks taboo '" << regex << "'.";
@@ -347,8 +347,8 @@ void assay_whitespace(file const& f)
         throw std::runtime_error(R"(File contains '\t'.)");
         }
 
-    static boost::regex const postinitial_tab(R"([^\n]\t)");
-    if(f.is_of_phylum(e_make) && boost::regex_search(f.data(), postinitial_tab))
+    static std::regex const postinitial_tab(R"(.\t)");
+    if(f.is_of_phylum(e_make) && std::regex_search(f.data(), postinitial_tab))
         {
         throw std::runtime_error(R"(File contains postinitial '\t'.)");
         }
@@ -406,9 +406,9 @@ void check_config_hpp(file const& f)
         {
         require(f, loose , "must include 'config.hpp'.");
         require(f, indent, R"(lacks line '#   include "config.hpp"'.)");
-        boost::smatch match;
-        static boost::regex const first_include(R"((# *include[^\n]*))");
-        boost::regex_search(f.data(), match, first_include);
+        std::smatch match;
+        static std::regex const first_include(R"((# *include.*))");
+        std::regex_search(f.data(), match, first_include);
         if(R"(#   include "config.hpp")" != match[1])
             {
             complain(f, "must include 'config.hpp' first.");
@@ -418,9 +418,9 @@ void check_config_hpp(file const& f)
         {
         require(f, loose , "must include 'config.hpp'.");
         require(f, strict, R"(lacks line '#include "config.hpp"'.)");
-        boost::smatch match;
-        static boost::regex const first_include(R"((# *include[^\n]*))");
-        boost::regex_search(f.data(), match, first_include);
+        std::smatch match;
+        static std::regex const first_include(R"((# *include.*))");
+        std::regex_search(f.data(), match, first_include);
         if(R"(#include "config.hpp")" != match[1])
             {
             complain(f, "must include 'config.hpp' first.");
@@ -490,14 +490,14 @@ void check_copyright(file const& f)
 
     { // Scope to avoid unwanted '-Wshadow' diagnostic.
     std::ostringstream oss;
-    oss << unutterable << R"( \(C\)[^\n]*)" << year;
+    oss << unutterable << R"( \(C\).*)" << year;
     require(f, oss.str(), "lacks current copyright.");
     }
 
     if(f.is_of_phylum(e_html) && !f.phyloanalyze("^COPYING"))
         {
         std::ostringstream oss;
-        oss << unutterable << R"( &copy;[^\n]*)" << year;
+        oss << unutterable << R"( &copy;.*)" << year;
         require(f, oss.str(), "lacks current secondary copyright.");
         }
 }
@@ -505,7 +505,7 @@ void check_copyright(file const& f)
 void check_cxx(file const& f)
 {
     // Remove this once these files have been rewritten.
-    if(f.phyloanalyze("^md5.[ch]pp$"))
+    if(f.phyloanalyze("^md5\\.[ch]pp$"))
         {
         return;
         }
@@ -516,12 +516,12 @@ void check_cxx(file const& f)
         }
 
     {
-    static boost::regex const r(R"((\w+)( +)([*&])(\w+\b)([*;]?)([^\n]*))");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"((\w+)( +)([*&])(\w+\b)([*;]?)(.*))");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         if
             (   "return"    != z[1]           // 'return *p'
             &&  "nix"       != z[4]           // '*nix'
@@ -537,12 +537,12 @@ void check_cxx(file const& f)
     }
 
     {
-    static boost::regex const r(R"(\bconst +([A-Za-z][A-Za-z0-9_:]*) *[*&])");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"(\bconst +([A-Za-z][A-Za-z0-9_:]*) *[*&])");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         if
             (   "volatile"  != z[1]           // 'const volatile'
             )
@@ -559,15 +559,17 @@ void check_cxx(file const& f)
     }
 
     {
-    static boost::regex const r(R"(\n# *ifn*def[^\n]+\n)");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"(\n# *ifn*def.+\n)");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         std::string s = z[0];
-        static boost::regex const include_guard(R"(# *ifndef *\l[_\d\l]*_hpp\W)");
-        if(!boost::regex_search(s, include_guard))
+        static std::regex const include_guard
+            (R"(#ifndef [[:lower:]][_[:digit:][:lower:]]+_hpp\W)"
+            );
+        if(!std::regex_search(s, include_guard))
             {
             ltrim(s, "\n");
             rtrim(s, "\n");
@@ -585,9 +587,9 @@ void check_cxx(file const& f)
     {
     // See:
     //   https://lists.nongnu.org/archive/html/lmi/2021-02/msg00023.html
-    static boost::regex const r(R"([^:s]size_t[^\n])");
+    static std::regex const r(R"([^:s]size_t.)");
     if
-        (  boost::regex_search(f.data(), r)
+        (  std::regex_search(f.data(), r)
         && f.file_name() != "test_coding_rules.cpp"
         )
         {
@@ -596,9 +598,9 @@ void check_cxx(file const& f)
     }
 
     {
-    static boost::regex const r(R"(# *endif\n)");
+    static std::regex const r(R"(# *endif\n)");
     if
-        (  boost::regex_search(f.data(), r)
+        (  std::regex_search(f.data(), r)
         )
         {
         complain(f, "contains unlabelled '#endif' directive.");
@@ -614,12 +616,12 @@ void check_cxx(file const& f)
     {
     // See:
     //   https://lists.nongnu.org/archive/html/lmi/2021-03/msg00032.html
-    static boost::regex const r(R"(\bR"([^(]*)[(])");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"(\bR"([^(]*)[(])");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         if
             (   "test_coding_rules.cpp" != f.file_name()
             &&  "--cut-here--" != z[1]
@@ -638,17 +640,17 @@ void check_cxx(file const& f)
     }
 
     {
-    static std::string const p(R"(\bfor\b[^\n]+[^:\n]:[^:\n][^)\n]+\))");
+    static std::string const p(R"(\bfor\b.+[^:\n]:[^:\n][^)\n]+\))");
     static std::string const q(R"(\bfor\b\( *([:\w]+)( *[^ ]*) *\w+([ :]+))");
     // This is "p && q || p", so to speak. If 'p' doesn't match, then
     // ignore this occurrence. Else if 'q' matches, then diagnose the
     // problem. Otherwise, match p again and show a diagnostic.
-    static boost::regex const r("(?=" + p + ")(?:" + q + ")|(" + p + ")");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r("(?=" + p + ")(?:" + q + ")|(" + p + ")");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         if("" == z[1] && "" == z[2] && "" == z[3])
             {
             std::ostringstream oss;
@@ -704,18 +706,18 @@ void check_cxx(file const& f)
 
 void check_defect_markers(file const& f)
 {
-    if(f.phyloanalyze("^test_coding_rules_test.sh$"))
+    if(f.phyloanalyze("^test_coding_rules_test\\.sh$"))
         {
         return;
         }
 
     {
-    static boost::regex const r(R"((\b\w+\b\W*)\?\?(.))");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"((\b\w+\b\W*)\?\?([^]))");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         bool const error_preceding = "TODO " != z[1];
         bool const error_following = " " != z[2] && "\n" != z[2];
         if(error_preceding || error_following)
@@ -728,12 +730,12 @@ void check_defect_markers(file const& f)
     }
 
     {
-    static boost::regex const r(R"((\b\w+\b\W?)!!(.))");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"((\b\w+\b\W?)!!([^]))");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         bool const error_preceding =
                 true
             &&  "7702 "        != z[1]
@@ -777,9 +779,9 @@ void check_include_guards(file const& f)
         return;
         }
 
-    std::string const guard = boost::regex_replace
+    std::string const guard = std::regex_replace
         (f.file_name()
-        ,boost::regex(R"(\.hpp$)")
+        ,std::regex(R"(\.hpp$)")
         ,"_hpp"
         );
     std::string const guard_start =
@@ -799,13 +801,14 @@ void check_inclusion_order(file const& f)
         return;
         }
 
-    static boost::regex const r(R"((?<=\n\n)(# *include *[<"][^\n]*\n)+\n)");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"(\n\n(# *include *[<"].*\n)+(?=\n))");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         std::string s = z[0];
+        ltrim(s, "\n");
         rtrim(s, "\n");
         std::vector<std::string> v = split_into_lines(s);
         if(!std::is_sorted(v.begin(), v.end()))
@@ -824,12 +827,12 @@ void check_label_indentation(file const& f)
         return;
         }
 
-    static boost::regex const r(R"(\n( *)([A-Za-z][A-Za-z0-9_]*)( *:)(?!:))");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"(\n( *)([A-Za-z][A-Za-z0-9_]*)( *:)(?!:))");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         if
             (   "default" != z[2]
             &&  "Usage"   != z[2]
@@ -869,9 +872,9 @@ void check_logs(file const& f)
         entries = f.data();
         }
 
-    static boost::regex const r(R"(\n(?!\|)(?! *https?:)([^\n]{71,})(?=\n))");
-    boost::sregex_iterator i(entries.begin(), entries.end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"(\n(?!\|)(?! *https?:)(.{71,})(?=\n))");
+    std::sregex_iterator i(entries.begin(), entries.end(), r);
+    std::sregex_iterator const omega;
     if(omega == i)
         {
         return;
@@ -885,7 +888,7 @@ void check_logs(file const& f)
         ;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         oss << '\n' << z[1];
         }
     complain(f, oss.str());
@@ -1060,17 +1063,17 @@ void check_reserved_names(file const& f)
         return;
         }
 
-    static boost::regex const r(R"((\b\w*__\w*\b))");
-    boost::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    boost::sregex_iterator const omega;
+    static std::regex const r(R"((\b\w*__\w*\b))");
+    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
+    std::sregex_iterator const omega;
     for(; i != omega; ++i)
         {
-        boost::smatch const& z(*i);
+        std::smatch const& z(*i);
         std::string const s = z[0];
-        static boost::regex const not_all_underscore("[A-Za-z0-9]");
+        static std::regex const not_all_underscore("[A-Za-z0-9]");
         if
             (   !check_reserved_name_exception(s)
-            &&  boost::regex_search(s, not_all_underscore)
+            &&  std::regex_search(s, not_all_underscore)
             )
             {
             std::ostringstream oss;
@@ -1096,14 +1099,14 @@ void enforce_taboos(file const& f)
     taboo(f, "Cambridge");
     taboo(f, "Temple P");
     // Patented.
-    taboo(f, R"(\.gif)", boost::regex::icase);
+    taboo(f, R"(\.gif)", std::regex::icase);
     // Obsolete email address.
-    taboo(f, "chicares@mindspring.com");
+    taboo(f, "chicares@mindspring\\.com");
     // Obscured email address.
     taboo(f, "address@hidden");
     // Certain proprietary libraries.
-    taboo(f, R"(\bowl\b)", boost::regex::icase);
-    taboo(f, "vtss", boost::regex::icase);
+    taboo(f, R"(\bowl\b)", std::regex::icase);
+    taboo(f, "vtss", std::regex::icase);
     // Suspiciously specific to msw (although the string "Microsoft"
     // is okay for identifying a GNU/Linux re-distribution).
     taboo(f, "Visual [A-Z]");
@@ -1127,31 +1130,31 @@ void enforce_taboos(file const& f)
         &&  !f.is_of_phylum(e_synopsis)
         )
         {
-        taboo(f, R"(\bexe\b)", boost::regex::icase);
+        taboo(f, R"(\bexe\b)", std::regex::icase);
         }
 
     if
         (   !f.is_of_phylum(e_make)
         &&  !f.is_of_phylum(e_patch)
-        &&  !f.phyloanalyze("config.hpp")
-        &&  !f.phyloanalyze("configure.ac") // GNU libtool uses 'win32-dll'.
+        &&  !f.phyloanalyze("config\\.hpp")
+        &&  !f.phyloanalyze("configure\\.ac") // GNU libtool uses 'win32-dll'.
         )
         {
-        taboo(f, "WIN32", boost::regex::icase);
+        taboo(f, "WIN32", std::regex::icase);
         }
 
     if
-        (  !boost::regex_search(f.data(), boost::regex(my_taboo_indulgence()))
+        (  !std::regex_search(f.data(), std::regex(my_taboo_indulgence()))
         && !contains(f.data(), "Automatically generated from custom input.")
         )
         {
         // Unspeakable private taboos.
         for(auto const& i : my_taboos())
             {
-            boost::regex::flag_type syntax =
+            std::regex::flag_type syntax =
                 i.second
-                ? boost::regex::ECMAScript | boost::regex::icase
-                : boost::regex::ECMAScript
+                ? std::regex::ECMAScript | std::regex::icase
+                : std::regex::ECMAScript
                 ;
             taboo(f, i.first, syntax);
             }
