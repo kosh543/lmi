@@ -41,6 +41,16 @@
 #include <stdexcept>                    // runtime_error
 #include <string>
 
+#if defined __GNUC__
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wctor-dtor-privacy"
+#   pragma GCC diagnostic ignored "-Wshadow"
+#endif
+#include "../ctre.hpp"
+#if defined __GNUC__
+#   pragma GCC diagnostic pop
+#endif
+
 std::string my_taboo_indulgence();       // See 'my_test_coding_rules.cpp'.
 
 std::map<std::string, bool> my_taboos(); // See 'my_test_coding_rules.cpp'.
@@ -86,7 +96,9 @@ class file final
 
     bool is_of_phylum(enum_phylum ) const;
     bool is_of_phylum(enum_kingdom) const;
-    bool phyloanalyze(std::string const&) const;
+    template <CTRE_REGEX_INPUT_TYPE regex>
+    constexpr
+    bool phyloanalyze() const;
 
     fs::path    const& path     () const {return path_;     }
     std::string const& full_name() const {return full_name_;}
@@ -106,6 +118,15 @@ class file final
     enum_phylum phylum_;
     std::string data_;
 };
+
+/// Analyze a file's name to determine its phylum.
+
+template <CTRE_REGEX_INPUT_TYPE regex>
+constexpr
+bool file::phyloanalyze() const
+{
+    return ctre::search<regex>(file_name());
+}
 
 /// Read file contents into a string.
 ///
@@ -199,21 +220,21 @@ file::file(std::string const& file_path)
         : ".xsd"        == extension() ? e_xml_other
         : ".xsl"        == extension() ? e_xml_other
         // phyloanalyze() tests inspect only file name [sort by enumerator]
-        : phyloanalyze("^ChangeLog-")  ? e_binary
-        : phyloanalyze("^Speed_")      ? e_binary
-        : phyloanalyze("^tags$")       ? e_expungible
-        : phyloanalyze("^COPYING$")    ? e_gpl
-        : phyloanalyze("^quoted_gpl")  ? e_gpl
-        : phyloanalyze("Log$")         ? e_log
-        : phyloanalyze("GNUmakefile$") ? e_make
-        : phyloanalyze("^Makefile")    ? e_make
-        : phyloanalyze("^md5sums$")    ? e_md5
-        : phyloanalyze("^INSTALL$")    ? e_synopsis
-        : phyloanalyze("^README")      ? e_synopsis
+        : phyloanalyze<"^ChangeLog-">()  ? e_binary
+        : phyloanalyze<"^Speed_">()      ? e_binary
+        : phyloanalyze<"^tags$">()       ? e_expungible
+        : phyloanalyze<"^COPYING$">()    ? e_gpl
+        : phyloanalyze<"^quoted_gpl">()  ? e_gpl
+        : phyloanalyze<"Log$">()         ? e_log
+        : phyloanalyze<"GNUmakefile$">() ? e_make
+        : phyloanalyze<"^Makefile">()    ? e_make
+        : phyloanalyze<"^md5sums$">()    ? e_md5
+        : phyloanalyze<"^INSTALL$">()    ? e_synopsis
+        : phyloanalyze<"^README">()      ? e_synopsis
         // test file contents only if necessary
         : begins_with(data(), "#!")    ? e_script
         // keep this last
-        : phyloanalyze("^eraseme")     ? e_ephemeral
+        : phyloanalyze<"^eraseme">()     ? e_ephemeral
         : throw std::runtime_error("File is unexpectedly uncategorizable.")
         ;
 
@@ -252,19 +273,24 @@ bool file::is_of_phylum(enum_kingdom z) const
     return z & phylum();
 }
 
-/// Analyze a file's name to determine its phylum.
-
-bool file::phyloanalyze(std::string const& s) const
-{
-    return std::regex_search(file_name(), std::regex(s));
-}
-
 bool error_flag = false;
 
 void complain(file const& f, std::string const& complaint)
 {
     error_flag = true;
     std::cout << "File '" << f.full_name() << "' " << complaint << std::endl;
+}
+
+template <CTRE_REGEX_INPUT_TYPE regex>
+void require
+    (file const&        f
+    ,std::string const& complaint
+    )
+{
+    if(!ctre::search<regex>(f.data()))
+        {
+        complain(f, complaint);
+        }
 }
 
 void require
@@ -279,15 +305,32 @@ void require
         }
 }
 
+template <CTRE_REGEX_INPUT_TYPE regex>
 void forbid
     (file const&        f
-    ,std::string const& regex
     ,std::string const& complaint
     )
 {
-    if(std::regex_search(f.data(), std::regex(regex)))
+    if(ctre::search<regex>(f.data()))
         {
         complain(f, complaint);
+        }
+}
+
+template <CTRE_REGEX_INPUT_TYPE regex>
+void taboo(file const& f)
+{
+    if(ctre::search<regex>(f.data()))
+        {
+        std::ostringstream oss;
+        oss << "breaks taboo '";
+        for(auto const& c : regex)
+            {
+            LMI_ASSERT(c < 0x7f); // Only ASCII characters allowed.
+            oss << static_cast<char>(c);
+            }
+        oss << "'.";
+        complain(f, oss.str());
         }
 }
 
@@ -347,8 +390,7 @@ void assay_whitespace(file const& f)
         throw std::runtime_error(R"(File contains '\t'.)");
         }
 
-    static std::regex const postinitial_tab(R"(.\t)");
-    if(f.is_of_phylum(e_make) && std::regex_search(f.data(), postinitial_tab))
+    if(f.is_of_phylum(e_make) && ctre::search<R"([^\n]\t)">(f.data()))
         {
         throw std::runtime_error(R"(File contains postinitial '\t'.)");
         }
@@ -388,24 +430,24 @@ void assay_whitespace(file const& f)
 
 void check_config_hpp(file const& f)
 {
-    static std::string const loose  (R"(# *include *[<"]config.hpp[>"])");
-    static std::string const strict (R"(\n(#include "config.hpp")\n)");
-    static std::string const indent (R"(\n(#   include "config.hpp")\n)");
+    constexpr ctll::fixed_string loose  (R"(# *include *[<"]config.hpp[>"])");
+    constexpr ctll::fixed_string strict (R"(\n(#include "config.hpp")\n)");
+    constexpr ctll::fixed_string indent (R"(\n(#   include "config.hpp")\n)");
 
     if
         (   f.is_of_phylum(e_log)
-        ||  f.phyloanalyze("^test_coding_rules.cpp$")
-        ||  f.phyloanalyze("^test_coding_rules_test.sh$")
-        ||  f.phyloanalyze("^GNUmakefile$")
-        ||  f.phyloanalyze(R"(^pchfile(_.*)?\.hpp$)")
+        ||  f.phyloanalyze<"^test_coding_rules.cpp$">()
+        ||  f.phyloanalyze<"^test_coding_rules_test.sh$">()
+        ||  f.phyloanalyze<"^GNUmakefile$">()
+        ||  f.phyloanalyze<R"(^pchfile(_[^.]*)?\.hpp$)">()
         )
         {
         return;
         }
-    else if(f.is_of_phylum(e_header) && f.phyloanalyze(R"(^pchlist(_.*)?\.hpp$)"))
+    else if(f.is_of_phylum(e_header) && f.phyloanalyze<R"(^pchlist(_[^.]*)?\.hpp$)">())
         {
-        require(f, loose , "must include 'config.hpp'.");
-        require(f, indent, R"(lacks line '#   include "config.hpp"'.)");
+        require<loose >(f, "must include 'config.hpp'.");
+        require<indent>(f, R"(lacks line '#   include "config.hpp"'.)");
         std::smatch match;
         static std::regex const first_include(R"((# *include.*))");
         std::regex_search(f.data(), match, first_include);
@@ -414,10 +456,10 @@ void check_config_hpp(file const& f)
             complain(f, "must include 'config.hpp' first.");
             }
         }
-    else if(f.is_of_phylum(e_header) && !f.phyloanalyze(R"(^config(_.*)?\.hpp$)"))
+    else if(f.is_of_phylum(e_header) && !f.phyloanalyze<R"(^config(_[^.]*)?\.hpp$)">())
         {
-        require(f, loose , "must include 'config.hpp'.");
-        require(f, strict, R"(lacks line '#include "config.hpp"'.)");
+        require<loose >(f, "must include 'config.hpp'.");
+        require<strict>(f, R"(lacks line '#include "config.hpp"'.)");
         std::smatch match;
         static std::regex const first_include(R"((# *include.*))");
         std::regex_search(f.data(), match, first_include);
@@ -428,7 +470,7 @@ void check_config_hpp(file const& f)
         }
     else
         {
-        forbid(f, loose, "must not include 'config.hpp'.");
+        forbid<loose>(f, "must not include 'config.hpp'.");
         }
 }
 
@@ -494,7 +536,7 @@ void check_copyright(file const& f)
     require(f, oss.str(), "lacks current copyright.");
     }
 
-    if(f.is_of_phylum(e_html) && !f.phyloanalyze("^COPYING"))
+    if(f.is_of_phylum(e_html) && !f.phyloanalyze<"^COPYING">())
         {
         std::ostringstream oss;
         oss << unutterable << R"( &copy;.*)" << year;
@@ -505,7 +547,7 @@ void check_copyright(file const& f)
 void check_cxx(file const& f)
 {
     // Remove this once these files have been rewritten.
-    if(f.phyloanalyze("^md5\\.[ch]pp$"))
+    if(f.phyloanalyze<"^md5\\.[ch]pp$">())
         {
         return;
         }
@@ -515,97 +557,75 @@ void check_cxx(file const& f)
         return;
         }
 
-    {
-    static std::regex const r(R"((\w+)( +)([*&])(\w+\b)([*;]?)(.*))");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"((?<lead>\w+) +(?<oper>[*&])(?<name>\w+\b)(?<term>[*;]?)[^\n]*)">(f.data()))
         {
-        std::smatch const& z(*i);
+        auto const lead = m.get<"lead">().str();
+        auto const oper = m.get<"oper">().str();
+        auto const name = m.get<"name">().str();
+        auto const term = m.get<"term">().str();
+
         if
-            (   "return"    != z[1]           // 'return *p'
-            &&  "nix"       != z[4]           // '*nix'
-            &&  !('*' == z[3] && '*' == z[5]) // '*emphasis*' in comment
-            &&  !('&' == z[3] && ';' == z[5]) // '&nbsp;'
+            (   "return"    != lead           // 'return *p'
+            &&  "nix"       != name           // '*nix'
+            &&  !("*" == oper && "*" == term) // '*emphasis*' in comment
+            &&  !("&" == oper && ";" == term) // '&nbsp;'
             )
             {
             std::ostringstream oss;
-            oss << "should fuse '" << z[3] << "' with type: '" << z[0] << "'.";
+            oss << "should fuse '" << oper << "' with type: '" << m << "'.";
             complain(f, oss.str());
             }
         }
-    }
 
-    {
-    static std::regex const r(R"(\bconst +([A-Za-z][A-Za-z0-9_:]*) *[*&])");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"(\bconst +([A-Za-z][A-Za-z0-9_:]*) *[*&])">(f.data()))
         {
-        std::smatch const& z(*i);
         if
-            (   "volatile"  != z[1]           // 'const volatile'
+            (   "volatile"  != m.get<1>()     // 'const volatile'
             )
             {
             std::ostringstream oss;
             oss
                 << "should write 'const' after the type it modifies: '"
-                << z[0]
+                << m
                 << "'."
                 ;
             complain(f, oss.str());
             }
         }
-    }
 
-    {
-    static std::regex const r(R"(\n# *ifn*def.+\n)");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::multiline_range<R"(^# *ifn*def.+)">(f.data()))
         {
-        std::smatch const& z(*i);
-        std::string s = z[0];
-        static std::regex const include_guard
-            (R"(#ifndef [[:lower:]][_[:digit:][:lower:]]+_hpp\W)"
-            );
-        if(!std::regex_search(s, include_guard))
+        // Check if it's not an include guard: note that this check is less
+        // strict than the checks in check_include_guards(), it's not clear if
+        // it's really desirable or not, but for now keep the things simple.
+        if(!ctre::search<R"(^#ifndef [[:lower:]][_[:digit:][:lower:]]+_hpp)">(m))
             {
-            ltrim(s, "\n");
-            rtrim(s, "\n");
             std::ostringstream oss;
             oss
                 << "should write '#if [!]defined' instead of '#if[n]def': '"
-                << s
+                << m
                 << "'."
                 ;
             complain(f, oss.str());
             }
         }
-    }
 
-    {
     // See:
     //   https://lists.nongnu.org/archive/html/lmi/2021-02/msg00023.html
-    static std::regex const r(R"([^:s]size_t.)");
     if
-        (  std::regex_search(f.data(), r)
+        (  ctre::search<R"([^:s]size_t[^\n])">(f.data())
         && f.file_name() != "test_coding_rules.cpp"
         )
         {
         complain(f, "contains unqualified 'size_t'.");
         }
-    }
 
-    {
-    static std::regex const r(R"(# *endif\n)");
     if
-        (  std::regex_search(f.data(), r)
+        (  ctre::search<R"(# *endif\n)">(f.data())
         )
         {
         complain(f, "contains unlabelled '#endif' directive.");
         }
-    }
 
     // Tests above: C or C++. Tests below: C++ only.
     if(!f.is_of_phylum(e_cxx))
@@ -613,88 +633,77 @@ void check_cxx(file const& f)
         return;
         }
 
-    {
     // See:
     //   https://lists.nongnu.org/archive/html/lmi/2021-03/msg00032.html
-    static std::regex const r(R"(\bR"([^(]*)[(])");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"(\bR"([^(]*)[(])">(f.data()))
         {
-        std::smatch const& z(*i);
+        auto const z = m.get<1>().str();
         if
             (   "test_coding_rules.cpp" != f.file_name()
-            &&  "--cut-here--" != z[1]
-            &&  ""             != z[1]
+            &&  "--cut-here--" != z
+            &&  ""             != z
             )
             {
             std::ostringstream oss;
             oss
                 << "contains noncanonical d-char-seq: '"
-                << z[1]
+                << z
                 << "'. Instead, use '--cut-here--'."
                 ;
             complain(f, oss.str());
             }
         }
-    }
 
-    {
-    static std::string const p(R"(\bfor\b.+[^:\n]:[^:\n][^)\n]+\))");
-    static std::string const q(R"(\bfor\b\( *([:\w]+)( *[^ ]*) *\w+([ :]+))");
-    // This is "p && q || p", so to speak. If 'p' doesn't match, then
-    // ignore this occurrence. Else if 'q' matches, then diagnose the
-    // problem. Otherwise, match p again and show a diagnostic.
-    static std::regex const r("(?=" + p + ")(?:" + q + ")|(" + p + ")");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"(\bfor\b[^\n]+[^:\n]:[^:\n][^)\n]+\))">(f.data()))
         {
-        std::smatch const& z(*i);
-        if("" == z[1] && "" == z[2] && "" == z[3])
+        auto const z = ctre::search<R"(\bfor\b\( *(?<typ>[:\w]+)(?<ref> *[^ ]*) *\w+(?<sep>[ :]+))">(m);
+        if(!z)
             {
             std::ostringstream oss;
             oss
                 << "spurious or malformed for-range-declaration: '"
-                << z[0] << "'."
+                << m << "'."
                 ;
             complain(f, oss.str());
             }
         else
             {
-            if("auto" != z[1])
+            auto const typ = z.get<"typ">().str();
+            auto const ref = z.get<"ref">().str();
+            auto const sep = z.get<"sep">().str();
+
+            if("auto" != typ)
                 {
                 std::ostringstream oss;
                 oss
                     << "for-range-declaration should"
                     << " deduce type rather than specify '"
-                    << z[1] << "'."
+                    << typ << "'."
                     ;
                 complain(f, oss.str());
                 }
-            if("&" != z[2] && " const&" != z[2])
+            if("&" != ref && " const&" != ref)
                 {
                 std::ostringstream oss;
                 oss
                     << "for-range-declaration should"
                     << " use 'auto&' or 'auto const&' instead of '"
-                    << z[1] << z[2] << "'."
+                    << typ << ref << "'."
                     ;
                 complain(f, oss.str());
                 }
-            if(" : " != z[3])
+            if(" : " != sep)
                 {
                 std::ostringstream oss;
                 oss
                     << "should have a space on both sides of the colon"
                     << " following the for-range-declaration, instead of '"
-                    << z[3] << "'."
+                    << sep << "'."
                     ;
                 complain(f, oss.str());
                 }
             }
         }
-    }
 }
 
 /// Check defect markers, which contain a doubled '!' or '?'.
@@ -706,70 +715,67 @@ void check_cxx(file const& f)
 
 void check_defect_markers(file const& f)
 {
-    if(f.phyloanalyze("^test_coding_rules_test\\.sh$"))
+    if(f.phyloanalyze<"^test_coding_rules_test\\.sh$">())
         {
         return;
         }
 
-    {
-    static std::regex const r(R"((\b\w+\b\W*)\?\?([^]))");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    // CTRE ?? Using "\W*" doesn't work, but using the equivalent character
+    // class explicitly does, see
+    // https://github.com/hanickadot/compile-time-regular-expressions/issues/199
+    for(auto m : ctre::range<R"((?<preceding>\b\w+[^_[:alnum:]]*)\?\?(?<following>.|\n))">(f.data()))
         {
-        std::smatch const& z(*i);
-        bool const error_preceding = "TODO " != z[1];
-        bool const error_following = " " != z[2] && "\n" != z[2];
+        auto const preceding = m.get<"preceding">().str();
+        auto const following = m.get<"following">().str();
+
+        bool const error_preceding = "TODO " != preceding;
+        bool const error_following = " " != following && "\n" != following;
         if(error_preceding || error_following)
             {
             std::ostringstream oss;
-            oss << "has irregular defect marker '" << z[0] << "'.";
+            oss << "has irregular defect marker '" << m << "'.";
             complain(f, oss.str());
             }
         }
-    }
 
-    {
-    static std::regex const r(R"((\b\w+\b\W?)!!([^]))");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"((?<preceding>\b\w+[^_[:alnum:]]?)!!(?<following>.|\n))">(f.data()))
         {
-        std::smatch const& z(*i);
+        auto const preceding = m.get<"preceding">().str();
+        auto const following = m.get<"following">().str();
+
         bool const error_preceding =
                 true
-            &&  "7702 "        != z[1]
-            &&  "BOOST "       != z[1]
-            &&  "COMPILER "    != z[1]
-            &&  "CURRENCY "    != z[1]
-            &&  "DATABASE "    != z[1]
-            &&  "DBO3 "        != z[1]
-            &&  "ET "          != z[1]
-            &&  "EVGENIY "     != z[1]
-            &&  "IHS "         != z[1]
-            &&  "INELEGANT "   != z[1]
-            &&  "INPUT "       != z[1]
-            &&  "LINGO "       != z[1]
-            &&  "MD5 "         != z[1]
-            &&  "PDF "         != z[1]
-            &&  "PORT "        != z[1]
-            &&  "SOMEDAY "     != z[1]
-            &&  "TAXATION "    != z[1]
-            &&  "THIRD_PARTY " != z[1]
-            &&  "TRICKY "      != z[1]
-            &&  "USER "        != z[1]
-            &&  "WX "          != z[1]
-            &&  "XMLWRAPP "    != z[1]
+            &&  "7702 "        != preceding
+            &&  "BOOST "       != preceding
+            &&  "COMPILER "    != preceding
+            &&  "CURRENCY "    != preceding
+            &&  "DATABASE "    != preceding
+            &&  "DBO3 "        != preceding
+            &&  "ET "          != preceding
+            &&  "EVGENIY "     != preceding
+            &&  "IHS "         != preceding
+            &&  "INELEGANT "   != preceding
+            &&  "INPUT "       != preceding
+            &&  "LINGO "       != preceding
+            &&  "MD5 "         != preceding
+            &&  "PDF "         != preceding
+            &&  "PORT "        != preceding
+            &&  "SOMEDAY "     != preceding
+            &&  "TAXATION "    != preceding
+            &&  "THIRD_PARTY " != preceding
+            &&  "TRICKY "      != preceding
+            &&  "USER "        != preceding
+            &&  "WX "          != preceding
+            &&  "XMLWRAPP "    != preceding
             ;
-        bool const error_following = " " != z[2] && "\n" != z[2];
+        bool const error_following = " " != following && "\n" != following;
         if(error_preceding || error_following)
             {
             std::ostringstream oss;
-            oss << "has irregular defect marker '" << z[0] << "'.";
+            oss << "has irregular defect marker '" << m << "'.";
             complain(f, oss.str());
             }
         }
-    }
 }
 
 void check_include_guards(file const& f)
@@ -801,13 +807,9 @@ void check_inclusion_order(file const& f)
         return;
         }
 
-    static std::regex const r(R"(\n\n(# *include *[<"].*\n)+(?=\n))");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"(\n\n(# *include *[<"][^\n]*\n)+(?=\n))">(f.data()))
         {
-        std::smatch const& z(*i);
-        std::string s = z[0];
+        std::string s = m.to_string();
         ltrim(s, "\n");
         rtrim(s, "\n");
         std::vector<std::string> v = split_into_lines(s);
@@ -827,21 +829,21 @@ void check_label_indentation(file const& f)
         return;
         }
 
-    static std::regex const r(R"(\n( *)([A-Za-z][A-Za-z0-9_]*)( *:)(?!:))");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"(\n(?<space> *)(?<label>[A-Za-z][A-Za-z0-9_]*)(?<colon> *:)(?!:))">(f.data()))
         {
-        std::smatch const& z(*i);
+        auto const space = m.get<"space">().str();
+        auto const label = m.get<"label">().str();
+        auto const colon = m.get<"colon">().str();
+
         if
-            (   "default" != z[2]
-            &&  "Usage"   != z[2]
-            &&  "  "      != z[1]
-            &&  "      "  != z[1]
+            (   "default" != label
+            &&  "Usage"   != label
+            &&  "  "      != space
+            &&  "      "  != space
             )
             {
             std::ostringstream oss;
-            oss << "has misindented label '" << z[1] << z[2] << z[3] << "'.";
+            oss << "has misindented label '" << space << label << colon << "'.";
             complain(f, oss.str());
             }
         }
@@ -872,10 +874,13 @@ void check_logs(file const& f)
         entries = f.data();
         }
 
-    static std::regex const r(R"(\n(?!\|)(?! *https?:)(.{71,})(?=\n))");
-    std::sregex_iterator i(entries.begin(), entries.end(), r);
-    std::sregex_iterator const omega;
-    if(omega == i)
+    std::vector<std::string> long_lines;
+    for(auto m : ctre::range<R"(\n(?!\|)(?! *https?:)([^\n]{71,})(?=\n))">(entries))
+        {
+        long_lines.push_back(m.get<1>().str());
+        }
+
+    if(long_lines.empty())
         {
         return;
         }
@@ -886,10 +891,9 @@ void check_logs(file const& f)
         << "0000000001111111111222222222233333333334444444444555555555566666666667\n"
         << "1234567890123456789012345678901234567890123456789012345678901234567890"
         ;
-    for(; i != omega; ++i)
+    for(auto const& line : long_lines)
         {
-        std::smatch const& z(*i);
-        oss << '\n' << z[1];
+        oss << '\n' << line;
         }
     complain(f, oss.str());
 }
@@ -1053,7 +1057,7 @@ bool check_reserved_name_exception(std::string const& s)
 
 void check_reserved_names(file const& f)
 {
-    if(f.phyloanalyze("^configure.ac$"))
+    if(f.phyloanalyze<"^configure.ac$">())
         {
         return;
         }
@@ -1063,17 +1067,12 @@ void check_reserved_names(file const& f)
         return;
         }
 
-    static std::regex const r(R"((\b\w*__\w*\b))");
-    std::sregex_iterator i(f.data().begin(), f.data().end(), r);
-    std::sregex_iterator const omega;
-    for(; i != omega; ++i)
+    for(auto m : ctre::range<R"((\b\w*__\w*\b))">(f.data()))
         {
-        std::smatch const& z(*i);
-        std::string const s = z[0];
-        static std::regex const not_all_underscore("[A-Za-z0-9]");
+        std::string const s = m.to_string();
         if
             (   !check_reserved_name_exception(s)
-            &&  std::regex_search(s, not_all_underscore)
+            &&  ctre::search<"[A-Za-z0-9]">(s)
             )
             {
             std::ostringstream oss;
@@ -1086,42 +1085,42 @@ void check_reserved_names(file const& f)
 void enforce_taboos(file const& f)
 {
     if
-        (   f.phyloanalyze("test_coding_rules")
-        ||  f.phyloanalyze("^md5sums$")
+        (   f.phyloanalyze<"test_coding_rules">()
+        ||  f.phyloanalyze<"^md5sums$">()
         )
         {
         return;
         }
 
     // ASCII copyright symbol requires upper-case 'C'.
-    taboo(f, R"(\(c\) *[0-9])");
+    taboo<R"(\(c\) *[0-9])">(f);
     // Former addresses of the Free Software Foundation.
-    taboo(f, "Cambridge");
-    taboo(f, "Temple P");
+    taboo<"Cambridge">(f);
+    taboo<"Temple P">(f);
     // Patented.
-    taboo(f, R"(\.gif)", std::regex::icase);
+    taboo<R"(\.[gG][iI][fF])">(f);
     // Obsolete email address.
-    taboo(f, "chicares@mindspring\\.com");
+    taboo<"chicares@mindspring\\.com">(f);
     // Obscured email address.
-    taboo(f, "address@hidden");
+    taboo<"address@hidden">(f);
     // Certain proprietary libraries.
-    taboo(f, R"(\bowl\b)", std::regex::icase);
-    taboo(f, "vtss", std::regex::icase);
+    taboo<R"(\b[oO][wW][lL]\b)">(f);
+    taboo<"[vV][tT][sS][sS]">(f);
     // Suspiciously specific to msw (although the string "Microsoft"
     // is okay for identifying a GNU/Linux re-distribution).
-    taboo(f, "Visual [A-Z]");
-    taboo(f, R"(\bWIN\b)");
-    taboo(f, R"(\bExcel\b)");
+    taboo<"Visual [A-Z]">(f);
+    taboo<R"(\bWIN\b)">(f);
+    taboo<R"(\bExcel\b)">(f);
     // Insinuated by certain msw tools.
-    taboo(f, "Microsoft Word");
-    taboo(f, "Stylus Studio");
-    taboo(f, "Sonic Software");
+    taboo<"Microsoft Word">(f);
+    taboo<"Stylus Studio">(f);
+    taboo<"Sonic Software">(f);
     // This IANA-approved charset is still useful for html.
     if(!f.is_of_phylum(e_html))
         {
-        taboo(f, "windows-1252");
+        taboo<"windows-1252">(f);
         }
-    taboo(f, "Arial");
+    taboo<"Arial">(f);
 
     if
         (   !f.is_of_phylum(e_log)
@@ -1130,17 +1129,17 @@ void enforce_taboos(file const& f)
         &&  !f.is_of_phylum(e_synopsis)
         )
         {
-        taboo(f, R"(\bexe\b)", std::regex::icase);
+        taboo<R"(\b[eE][xX][eE]\b)">(f);
         }
 
     if
         (   !f.is_of_phylum(e_make)
         &&  !f.is_of_phylum(e_patch)
-        &&  !f.phyloanalyze("config\\.hpp")
-        &&  !f.phyloanalyze("configure\\.ac") // GNU libtool uses 'win32-dll'.
+        &&  !f.phyloanalyze<"config\\.hpp">()
+        &&  !f.phyloanalyze<"configure\\.ac">() // GNU libtool uses 'win32-dll'.
         )
         {
-        taboo(f, "WIN32", std::regex::icase);
+        taboo<"[wW][iI][nN]32">(f);
         }
 
     if
